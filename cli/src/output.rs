@@ -374,7 +374,12 @@ pub fn print_response_with_opts(resp: &Response, action: Option<&str>, opts: &Ou
                         .get("resourceType")
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
-                    println!("{} {} ({})", method, url, resource_type);
+                    let body_suffix = req
+                        .get("requestBody")
+                        .and_then(|v| v.as_str())
+                        .map(|b| format!(" [body: {} bytes]", b.len()))
+                        .unwrap_or_default();
+                    println!("{} {} ({}){}", method, url, resource_type, body_suffix);
                 }
             }
             return;
@@ -1727,6 +1732,7 @@ Subcommands:
   requests [options]         List captured requests
     --clear                  Clear request log
     --filter <pattern>       Filter by URL pattern
+    (includes requestBody for requests with postData)
   har <start|stop> [path]    Record and export a HAR file
 
 Global Options:
@@ -2541,6 +2547,7 @@ Network:  agent-browser network <action>
   route <url> [--abort|--body <json>]
   unroute [url]
   requests [--clear] [--filter <pattern>]
+    # Includes requestBody for requests with postData (use --json to inspect)
   har <start|stop> [path]
 
 Storage:

@@ -87,6 +87,10 @@ pub struct TrackedRequest {
     pub url: String,
     pub method: String,
     pub headers: Value,
+    /// Raw request body captured from CDP `request.postData` when available.
+    /// This is typically present for POST/PUT/PATCH requests.
+    #[serde(rename = "requestBody")]
+    pub request_body: Option<String>,
     pub timestamp: u64,
     #[serde(rename = "resourceType")]
     pub resource_type: String,
@@ -403,6 +407,10 @@ impl DaemonState {
                                 if self.request_tracking {
                                     let headers =
                                         request.get("headers").cloned().unwrap_or(json!({}));
+                                    let request_body = request
+                                        .get("postData")
+                                        .and_then(|v| v.as_str())
+                                        .map(String::from);
                                     let resource_type = event
                                         .params
                                         .get("type")
@@ -417,6 +425,7 @@ impl DaemonState {
                                         url,
                                         method,
                                         headers,
+                                        request_body,
                                         timestamp,
                                         resource_type,
                                     });
@@ -5862,6 +5871,22 @@ mod tests {
         assert_eq!(state.session_id, "default");
         assert!(!state.tracing_state.active);
         assert!(!state.recording_state.active);
+    }
+
+    #[test]
+    fn test_tracked_request_serializes_request_body() {
+        let req = TrackedRequest {
+            url: "https://example.com/api".to_string(),
+            method: "POST".to_string(),
+            headers: json!({"content-type": "application/json"}),
+            request_body: Some(r#"{"ok":true}"#.to_string()),
+            timestamp: 123,
+            resource_type: "XHR".to_string(),
+        };
+
+        let value = serde_json::to_value(req).expect("tracked request should serialize");
+        assert_eq!(value["requestBody"], r#"{"ok":true}"#);
+        assert_eq!(value["resourceType"], "XHR");
     }
 
     #[test]

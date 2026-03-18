@@ -543,6 +543,7 @@ async fn test_tracked_request_struct() {
         url: "https://example.com/api".to_string(),
         method: "GET".to_string(),
         headers: json!({"Accept": "text/html"}),
+        request_body: None,
         timestamp: 12345,
         resource_type: "Document".to_string(),
     };
@@ -563,6 +564,7 @@ async fn test_request_tracking_state() {
         url: "https://example.com".to_string(),
         method: "GET".to_string(),
         headers: json!({}),
+        request_body: None,
         timestamp: 1,
         resource_type: "Document".to_string(),
     });
@@ -570,6 +572,7 @@ async fn test_request_tracking_state() {
         url: "https://other.com".to_string(),
         method: "POST".to_string(),
         headers: json!({}),
+        request_body: Some("{\"k\":\"v\"}".to_string()),
         timestamp: 2,
         resource_type: "XHR".to_string(),
     });
