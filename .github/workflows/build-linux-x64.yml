@@ -1,0 +1,43 @@
+name: Build Linux x64
+
+on:
+  push:
+    branches:
+      - fixes
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-linux-x64:
+    name: Build Linux x64 CLI
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cli
+
+      - name: Build release binary
+        run: cargo build --release --manifest-path cli/Cargo.toml
+
+      - name: Prepare artifact
+        run: |
+          mkdir -p artifacts
+          cp cli/target/release/agent-browser artifacts/agent-browser-linux-x64
+          chmod +x artifacts/agent-browser-linux-x64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-browser-linux-x64
+          path: artifacts/agent-browser-linux-x64
+          retention-days: 7
