@@ -146,6 +146,14 @@ impl WaitUntil {
     }
 }
 
+fn should_wait_for_lifecycle(nav_result: &PageNavigateResult, wait_until: WaitUntil) -> bool {
+    // CDP omits loaderId for same-document navigations (hash changes, SPA
+    // history transitions, and re-opening the current URL). Those navigations
+    // do not emit a new load/DOMContentLoaded event, so waiting for one causes
+    // false timeouts even though the page is already usable.
+    nav_result.loader_id.is_some() || matches!(wait_until, WaitUntil::NetworkIdle)
+}
+
 pub enum BrowserProcess {
     Chrome(ChromeProcess),
     Lightpanda(LightpandaProcess),
@@ -465,8 +473,10 @@ impl BrowserManager {
             return Err(format!("Navigation failed: {}", error_text));
         }
 
-        self.wait_for_lifecycle(wait_until, &session_id, &mut lifecycle_rx)
-            .await?;
+        if should_wait_for_lifecycle(&nav_result, wait_until) {
+            self.wait_for_lifecycle(wait_until, &session_id, &mut lifecycle_rx)
+                .await?;
+        }
 
         let page_url = self.get_url().await.unwrap_or_else(|_| url.to_string());
         let title = self.get_title().await.unwrap_or_default();
@@ -1372,6 +1382,44 @@ mod tests {
     #[test]
     fn test_validate_launch_options_valid() {
         assert!(validate_launch_options(None, false, None, None, false, None,).is_ok());
+    }
+
+    #[test]
+    fn test_should_wait_for_lifecycle_for_full_navigation() {
+        let nav_result = PageNavigateResult {
+            frame_id: "frame-1".to_string(),
+            loader_id: Some("loader-1".to_string()),
+            error_text: None,
+        };
+
+        assert!(should_wait_for_lifecycle(&nav_result, WaitUntil::Load));
+        assert!(should_wait_for_lifecycle(
+            &nav_result,
+            WaitUntil::DomContentLoaded
+        ));
+        assert!(should_wait_for_lifecycle(
+            &nav_result,
+            WaitUntil::NetworkIdle
+        ));
+    }
+
+    #[test]
+    fn test_should_not_wait_for_load_on_same_document_navigation() {
+        let nav_result = PageNavigateResult {
+            frame_id: "frame-1".to_string(),
+            loader_id: None,
+            error_text: None,
+        };
+
+        assert!(!should_wait_for_lifecycle(&nav_result, WaitUntil::Load));
+        assert!(!should_wait_for_lifecycle(
+            &nav_result,
+            WaitUntil::DomContentLoaded
+        ));
+        assert!(should_wait_for_lifecycle(
+            &nav_result,
+            WaitUntil::NetworkIdle
+        ));
     }
 
     #[test]
