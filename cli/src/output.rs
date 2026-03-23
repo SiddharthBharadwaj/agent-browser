@@ -1724,7 +1724,7 @@ Subcommands:
     --abort                  Abort matching requests
     --body <json>            Respond with custom body
   unroute [url]              Remove route (all if no URL)
-  requests [options]         List captured requests
+  requests [options]         List captured requests (scoped to active routes when present)
     --clear                  Clear request log
     --filter <pattern>       Filter by URL pattern
   har <start|stop> [path]    Record and export a HAR file
@@ -1738,6 +1738,7 @@ Examples:
   agent-browser network route "**/data.json" --body '{"mock": true}'
   agent-browser network unroute
   agent-browser network requests
+  agent-browser network route "example.com" && agent-browser network requests
   agent-browser network requests --filter "api"
   agent-browser network requests --clear
   agent-browser network har start

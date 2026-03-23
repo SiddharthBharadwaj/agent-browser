@@ -5418,20 +5418,7 @@ async fn resolve_fetch_paused(
 
     // Route matching
     for route in routes {
-        let matches = if route.url_pattern == "*" {
-            true
-        } else if route.url_pattern.contains('*') {
-            let parts: Vec<&str> = route.url_pattern.split('*').collect();
-            if parts.len() == 2 {
-                paused.url.starts_with(parts[0]) && paused.url.ends_with(parts[1])
-            } else {
-                paused.url.contains(&route.url_pattern)
-            }
-        } else {
-            paused.url.contains(&route.url_pattern)
-        };
-
-        if matches {
+        if url_matches_pattern(&paused.url, &route.url_pattern) {
             if route.abort {
                 let _ = client
                     .send_command(
@@ -5518,6 +5505,21 @@ async fn resolve_fetch_paused(
             )
             .await;
     }
+}
+
+fn url_matches_pattern(url: &str, pattern: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+
+    if pattern.contains('*') {
+        let parts: Vec<&str> = pattern.split('*').collect();
+        if parts.len() == 2 {
+            return url.starts_with(parts[0]) && url.ends_with(parts[1]);
+        }
+    }
+
+    url.contains(pattern)
 }
 
 // ---------------------------------------------------------------------------
@@ -5650,15 +5652,27 @@ async fn handle_requests(cmd: &Value, state: &mut DaemonState) -> Result<Value, 
     }
 
     let filter = cmd.get("filter").and_then(|v| v.as_str());
-    let requests: Vec<&TrackedRequest> = if let Some(f) = filter {
-        state
-            .tracked_requests
-            .iter()
-            .filter(|r| r.url.contains(f))
-            .collect()
-    } else {
-        state.tracked_requests.iter().collect()
-    };
+    // Keep request tracking simple and cheap in the hot path, then scope the
+    // visible request list to the active routes here so `network requests`
+    // reflects the same patterns used by `network route`.
+    let route_patterns: Vec<String> = state
+        .routes
+        .read()
+        .await
+        .iter()
+        .map(|route| route.url_pattern.clone())
+        .collect();
+    let requests: Vec<&TrackedRequest> = state
+        .tracked_requests
+        .iter()
+        .filter(|request| {
+            route_patterns.is_empty()
+                || route_patterns
+                    .iter()
+                    .any(|pattern| url_matches_pattern(&request.url, pattern))
+        })
+        .filter(|request| filter.is_none_or(|pattern| request.url.contains(pattern)))
+        .collect();
 
     Ok(json!({ "requests": requests }))
 }
@@ -7039,6 +7053,60 @@ mod tests {
             patterns.len(),
             1,
             "Should not add a second wildcard when routes already contain one"
+        );
+    }
+
+    #[test]
+    fn test_url_matches_pattern_supports_wildcards_and_substrings() {
+        assert!(url_matches_pattern(
+            "https://example.com/app/#/login",
+            "example.com"
+        ));
+        assert!(url_matches_pattern(
+            "https://example.com/api/session",
+            "https://example.com/*"
+        ));
+        assert!(url_matches_pattern("https://example.com/api/session", "*"));
+        assert!(!url_matches_pattern(
+            "https://cdn.example.com/app.js",
+            "app.example.com"
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_handle_requests_scopes_output_to_active_routes() {
+        let mut state = DaemonState::new();
+        state.request_tracking = true;
+        state.tracked_requests.push(TrackedRequest {
+            url: "https://example.com/api/session".to_string(),
+            method: "GET".to_string(),
+            headers: json!({}),
+            timestamp: 1,
+            resource_type: "XHR".to_string(),
+        });
+        state.tracked_requests.push(TrackedRequest {
+            url: "https://analytics.other-site.test/pixel".to_string(),
+            method: "GET".to_string(),
+            headers: json!({}),
+            timestamp: 2,
+            resource_type: "Image".to_string(),
+        });
+        {
+            let mut routes = state.routes.write().await;
+            routes.push(RouteEntry {
+                url_pattern: "example.com".to_string(),
+                response: None,
+                abort: false,
+            });
+        }
+
+        let result = handle_requests(&json!({}), &mut state).await.unwrap();
+        let requests = result["requests"].as_array().unwrap();
+
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            requests[0]["url"].as_str(),
+            Some("https://example.com/api/session")
         );
     }
 
